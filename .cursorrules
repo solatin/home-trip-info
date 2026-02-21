@@ -1,0 +1,18 @@
+# home-trip-info
+
+Static web app (HTML + JS), chạy trên Chrome iOS. Không framework, không build.
+
+## Chạy app
+- **Chạy server:** `npm run dev` hoặc `npm start` (serve tại http://localhost:3000)
+- **Test với chế độ giả lập:** Mở http://localhost:3000/?test=1
+- Sau khi server chạy, có thể mở link trong browser (internal/external) để test
+
+## Cấu trúc
+- `index.html` — UI + logic (GPS, speech, blocks)
+- `data.js` — chỉ mảng BLOCKS; `route.js` — ROUTE (sinh từ geojson.json bởi `node scripts/geojson-to-js.js`)
+- `geojson.json` — nguồn tuyến (mảng `[lng, lat]`)
+- Deploy: Vercel (HTTPS)
+
+## Khi user nhờ "chạy", "test", "mở browser"
+1. Chạy `npm run dev` (nếu chưa chạy)
+2. Gợi ý mở http://localhost:3000 hoặc http://localhost:3000/?test=1 trong browser

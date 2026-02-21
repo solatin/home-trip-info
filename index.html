@@ -165,6 +165,33 @@
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
     }
+
+    .test-card {
+      border-color: var(--warning);
+      background: rgba(210, 153, 34, 0.08);
+    }
+    .test-card label {
+      display: block;
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .test-card input {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 1rem;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+      margin-bottom: 12px;
+      box-sizing: border-box;
+    }
+    .test-card input::placeholder { color: var(--muted); opacity: 0.7; }
+    .test-card .btn-apply {
+      margin-top: 8px;
+      width: 100%;
+    }
   </style>
 </head>
 <body>
@@ -177,6 +204,15 @@
     <div class="actions">
       <button type="button" class="btn btn-primary" id="btnAudio">Bật âm thanh</button>
       <button type="button" class="btn btn-secondary" id="btnReread" disabled>Đọc lại</button>
+      <button type="button" class="btn btn-secondary" id="btnReadDetail" disabled style="display: none;">Đọc chi tiết</button>
+    </div>
+
+    <div class="card test-card" id="cardTestMode" style="display: none;">
+      <strong>Chế độ test</strong>
+      <p style="font-size: 0.9rem; color: var(--muted); margin: 8px 0 12px;">Nhập tọa độ <code>lat, lon</code> (ví dụ: 12.866653, 108.2558594)</p>
+      <label for="testGps">lat, lon</label>
+      <input type="text" id="testGps" placeholder="12.866653, 108.2558594" inputmode="decimal" />
+      <button type="button" class="btn btn-primary btn-apply" id="btnApplyTest">Áp dụng tọa độ</button>
     </div>
 
     <div class="card" id="cardBlock">
@@ -193,8 +229,10 @@
     </div>
   </div>
 
-  <!-- Dữ liệu block: load trước script chính -->
+  <!-- data.js (BLOCKS) → route.js (ROUTE từ geojson) → map-matching -->
   <script src="./data.js"></script>
+  <script src="./route.js"></script>
+  <script src="./map-matching.js"></script>
   <script>
     (function () {
       "use strict";
@@ -202,24 +240,29 @@
       // --- Cấu hình ---
       var WATCH_OPTIONS = {
         enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 15000
+        maximumAge: 60000,  // Cho phép dùng vị trí cache ≤ 1 phút (desktop thường chỉ có network location)
+        timeout: 60000      // 60s (desktop/macOS network location có thể rất chậm)
       };
-      var WATCH_INTERVAL_MS = 4000;   // 4 giây
-      var GEOCODE_DEBOUNCE_MS = 9000; // 9 giây
-      var NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1";
+      var WATCH_INTERVAL_MS = 5000;   // 5 giây (chỉ bật sau khi đã có vị trí thành công)
+      var GPS_TIMEOUT_ERROR_AFTER = 3; // Chỉ hiển thị lỗi đỏ sau N lần timeout liên tiếp
 
       // --- State ---
-      var startPoint = null;       // { lat, lon } điểm xuất phát
-      var currentBlock = null;     // block đang active
+      var testMode = (function () {
+        var p = typeof window !== "undefined" && window.location && window.location.search;
+        return p && (p.indexOf("test=1") >= 0 || p.indexOf("test=true") >= 0);
+      })();
+      var currentBlock = null;     // block đang active (từ MapMatcher + ROUTE/BLOCKS)
       var lastBlockId = null;      // để phát hiện đổi block
       var audioEnabled = false;
-      var geocodeTimer = null;
-      var lastGeocodeResult = null;
       var watchId = null;
+      var pollIntervalId = null;  // getCurrentPosition định kỳ, chỉ chạy sau khi đã có fix
+      var gpsTimeoutCount = 0;    // Đếm timeout liên tiếp, chỉ báo lỗi sau vài lần
 
       // --- DOM ---
       var statusEl = document.getElementById("status");
+      var cardTestMode = document.getElementById("cardTestMode");
+      var testGpsEl = document.getElementById("testGps");
+      var btnApplyTest = document.getElementById("btnApplyTest");
       var emptyStateEl = document.getElementById("emptyState");
       var blockDetailEl = document.getElementById("blockDetail");
       var blockNameEl = document.getElementById("blockName");
@@ -229,74 +272,23 @@
       var infoLineEl = document.getElementById("infoLine");
       var btnAudio = document.getElementById("btnAudio");
       var btnReread = document.getElementById("btnReread");
+      var btnReadDetail = document.getElementById("btnReadDetail");
 
       /**
-       * Tính khoảng cách Haversine (km) giữa hai điểm WGS84
+       * Tạo nội dung chữ từ block.depth_info (history, geography, people_profession, comparison)
        */
-      function haversineKm(lat1, lon1, lat2, lon2) {
-        var R = 6371;
-        var dLat = (lat2 - lat1) * Math.PI / 180;
-        var dLon = (lon2 - lon1) * Math.PI / 180;
-        var a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-          Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
+      function buildDepthText(depthInfo) {
+        if (!depthInfo || typeof depthInfo !== "object") return "";
+        var parts = [];
+        if (depthInfo.history) parts.push("Lịch sử: " + depthInfo.history);
+        if (depthInfo.geography) parts.push("Địa lý: " + depthInfo.geography);
+        if (depthInfo.people_profession) parts.push("Con người và nghề nghiệp: " + depthInfo.people_profession);
+        if (depthInfo.comparison) parts.push("So sánh: " + depthInfo.comparison);
+        return parts.join("\n\n");
       }
 
       /**
-       * Tìm block theo quãng đường đã đi (traveled_km).
-       * Nếu có lastGeocodeResult (district) thì ưu tiên block trùng district.
-       */
-      function findBlockByTraveledKm(traveledKm, districtFromGeocode) {
-        if (typeof BLOCKS === "undefined" || !BLOCKS.length) return null;
-
-        var candidates = BLOCKS.filter(function (b) {
-          return traveledKm >= b.start_km && traveledKm <= b.end_km;
-        });
-
-        if (districtFromGeocode && candidates.length > 1) {
-          var byDistrict = candidates.filter(function (b) {
-            return b.district && districtFromGeocode.indexOf(b.district) >= 0;
-          });
-          if (byDistrict.length) return byDistrict[0];
-        }
-        if (candidates.length) return candidates[0];
-        if (traveledKm < BLOCKS[0].start_km) return BLOCKS[0];
-        return BLOCKS[BLOCKS.length - 1];
-      }
-
-      /**
-       * Gọi Nominatim reverse geocode (debounce gọi từ ngoài)
-       */
-      function reverseGeocode(lat, lon, callback) {
-        var url = NOMINATIM_URL.replace("{lat}", lat).replace("{lon}", lon);
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", url);
-        xhr.setRequestHeader("Accept", "application/json");
-        xhr.onreadystatechange = function () {
-          if (xhr.readyState !== 4) return;
-          if (xhr.status !== 200) {
-            callback(null);
-            return;
-          }
-          try {
-            var data = JSON.parse(xhr.responseText);
-            var addr = data.address || {};
-            var district = addr.county || addr.district || addr.municipality || "";
-            var province = addr.state || addr.province || "";
-            lastGeocodeResult = { district: district, province: province };
-            callback(lastGeocodeResult);
-          } catch (e) {
-            callback(null);
-          }
-        };
-        xhr.send();
-      }
-
-      /**
-       * Cập nhật UI cho một block
+       * Cập nhật UI cho một block (data.js: id, name, region, info, km_start, km_end, depth_info)
        */
       function renderBlock(block, traveledKm) {
         if (!block) return;
@@ -304,14 +296,23 @@
         emptyStateEl.style.display = "none";
         blockDetailEl.style.display = "block";
 
-        blockNameEl.textContent = block.id + " · " + (block.district || "") + ", " + (block.province || "");
-        shortTextEl.textContent = block.short_text || "";
-        longTextEl.textContent = block.long_text || "";
-        longTextEl.style.display = "none";
-        toggleDetailBtn.textContent = "Xem chi tiết";
+        blockNameEl.textContent = (block.id ? block.id + " · " : "") + (block.name || "") + ", " + (block.region || "");
+        shortTextEl.textContent = block.info || "";
+        var depthText = buildDepthText(block.depth_info);
+        longTextEl.textContent = depthText;
+        if (depthText) {
+          longTextEl.style.display = "none";
+          toggleDetailBtn.style.display = "inline-block";
+          toggleDetailBtn.textContent = "Xem chi tiết";
+        } else {
+          longTextEl.style.display = "none";
+          toggleDetailBtn.style.display = "none";
+        }
 
         var kmText = traveledKm != null ? "Đã đi ~" + traveledKm.toFixed(1) + " km · " : "";
-        infoLineEl.textContent = kmText + "Đoạn " + block.start_km + " – " + block.end_km + " km";
+        var range = window.MapMatcher && window.MapMatcher.getBlockKmRange(block);
+        var rangeStr = range ? "Đoạn " + range.start_km.toFixed(1) + " – " + range.end_km.toFixed(1) + " km" : "";
+        infoLineEl.textContent = kmText + rangeStr;
       }
 
       /**
@@ -331,59 +332,69 @@
       }
 
       /**
-       * Xử lý khi có vị trí mới: đặt start point, tính traveled_km, geocode (debounce), chọn block, cập nhật UI + audio
+       * Tạo toàn bộ nội dung đọc khi chuyển vùng: title → info → depth_info
+       */
+      function getBlockFullSpeechText(block) {
+        if (!block) return "";
+        var title = (block.id ? block.id + " · " : "") + (block.name || "") + ", " + (block.region || "");
+        var parts = [title];
+        if (block.info) parts.push(block.info);
+        var depthText = buildDepthText(block.depth_info);
+        if (depthText) parts.push(depthText);
+        return parts.join(". ");
+      }
+
+      /**
+       * Xử lý khi có vị trí mới: map-matching theo ROUTE → traveled_km → block, cập nhật UI + audio
        */
       function onPositionUpdate(position) {
         var lat = position.coords.latitude;
         var lon = position.coords.longitude;
+        gpsTimeoutCount = 0; // Reset khi có vị trí thành công
+        console.log("[GPS] position", lat.toFixed(5), lon.toFixed(5));
 
-        if (startPoint === null) {
-          startPoint = { lat: lat, lon: lon };
-          setStatus("Đã lưu điểm xuất phát. Đang cập nhật...", "gps-ok");
+        if (!window.MapMatcher || !window.ROUTE || !window.BLOCKS) {
+          setStatus("Thiếu tuyến (geojson) hoặc BLOCKS.", "gps-error");
+          return;
         }
 
-        var traveledKm = haversineKm(startPoint.lat, startPoint.lon, lat, lon);
-        var districtFromGeocode = lastGeocodeResult ? lastGeocodeResult.district : null;
-        var block = findBlockByTraveledKm(traveledKm, districtFromGeocode);
+        var traveledKm = window.MapMatcher.getTraveledKM(lat, lon);
+        var block = window.MapMatcher.getCurrentBlock(traveledKm);
 
         if (block && block.id !== lastBlockId) {
           lastBlockId = block.id;
           currentBlock = block;
           renderBlock(block, traveledKm);
-          if (audioEnabled && block.short_text) {
-            speakText(block.short_text);
+          if (audioEnabled) {
+            var fullText = getBlockFullSpeechText(block);
+            if (fullText) speakText(fullText);
           }
         } else if (block) {
           currentBlock = block;
           renderBlock(block, traveledKm);
-        } else if (BLOCKS && BLOCKS.length) {
-          currentBlock = BLOCKS[0];
+        } else if (window.BLOCKS && window.BLOCKS.length) {
+          currentBlock = window.BLOCKS[0];
           renderBlock(currentBlock, traveledKm);
         }
 
-        // Reverse geocode debounce
-        if (geocodeTimer) clearTimeout(geocodeTimer);
-        geocodeTimer = setTimeout(function () {
-          geocodeTimer = null;
-          reverseGeocode(lat, lon, function (result) {
-            if (result && currentBlock) {
-              var blockAgain = findBlockByTraveledKm(traveledKm, result.district);
-              if (blockAgain && blockAgain.id !== currentBlock.id) {
-                currentBlock = blockAgain;
-                lastBlockId = blockAgain.id;
-                renderBlock(currentBlock, traveledKm);
-                if (audioEnabled && blockAgain.short_text) speakText(blockAgain.short_text);
-              }
-            }
-          });
-        }, GEOCODE_DEBOUNCE_MS);
+        if (pollIntervalId == null) startPollingIfNeeded();
+        setStatus("Đã cập nhật vị trí theo tuyến.", "gps-ok");
       }
 
       function onPositionError(err) {
+        console.warn("[GPS] onPositionError", err.code, err.message);
+        if (err.code === 3) {
+          gpsTimeoutCount += 1;
+          if (gpsTimeoutCount >= GPS_TIMEOUT_ERROR_AFTER) {
+            setStatus("Lỗi GPS: Hết thời gian chờ. Kiểm tra quyền vị trí hoặc dùng ?test=1 để thử.", "gps-error");
+          } else {
+            setStatus("Đang lấy vị trí... (" + gpsTimeoutCount + "/" + GPS_TIMEOUT_ERROR_AFTER + ")", "gps-pending");
+          }
+          return;
+        }
         var msg = "Lỗi GPS: ";
         if (err.code === 1) msg += "Từ chối quyền.";
         else if (err.code === 2) msg += "Không lấy được vị trí.";
-        else if (err.code === 3) msg += "Hết thời gian chờ.";
         else msg += err.message || "Không xác định.";
         setStatus(msg, "gps-error");
       }
@@ -394,7 +405,9 @@
       }
 
       /**
-       * Bật theo dõi GPS (sau khi user đã bật âm thanh / tương tác)
+       * Bật theo dõi GPS (sau khi user đã bật âm thanh / tương tác).
+       * Chỉ thêm polling (getCurrentPosition định kỳ) sau khi đã có ít nhất 1 lần lấy vị trí thành công,
+       * tránh gọi getCurrentPosition liên tục gây nhiều lỗi timeout.
        */
       function startWatching() {
         if (watchId != null) return;
@@ -402,16 +415,42 @@
           setStatus("Trình duyệt không hỗ trợ GPS.", "gps-error");
           return;
         }
-        setStatus("Đang lấy vị trí...", "gps-pending");
+        setStatus("Đang lấy vị trí (có thể mất đến 60 giây trên máy bàn)...", "gps-pending");
         watchId = navigator.geolocation.watchPosition(onPositionUpdate, onPositionError, WATCH_OPTIONS);
-        // Cập nhật theo chu kỳ nếu watchPosition không đủ (một số thiết bị)
-        setInterval(function () {
+      }
+
+      function startPollingIfNeeded() {
+        if (pollIntervalId != null) return;
+        pollIntervalId = setInterval(function () {
           if (watchId == null) return;
           navigator.geolocation.getCurrentPosition(onPositionUpdate, onPositionError, WATCH_OPTIONS);
         }, WATCH_INTERVAL_MS);
       }
 
-      // --- Nút "Bật âm thanh": kích hoạt audio (iOS cần user gesture) + xin GPS
+      // --- Test mode: hiện card nhập tọa độ, prefill đầu tuyến nếu có
+      if (testMode && cardTestMode) {
+        cardTestMode.style.display = "block";
+        if (window.ROUTE && window.ROUTE.length && testGpsEl) {
+          testGpsEl.placeholder = String(window.ROUTE[0].lat) + ", " + String(window.ROUTE[0].lon);
+        }
+        setStatus("Chế độ test: nhập lat, lon và nhấn \"Áp dụng tọa độ\".", "gps-pending");
+      }
+
+      btnApplyTest.addEventListener("click", function () {
+        var raw = (testGpsEl.value.trim() || (testGpsEl.placeholder || "")).split(",");
+        var latStr = raw[0] ? raw[0].trim() : "";
+        var lonStr = raw[1] ? raw[1].trim() : "";
+        var lat = parseFloat(latStr, 10);
+        var lon = parseFloat(lonStr, 10);
+        if (Number.isNaN(lat) || Number.isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+          setStatus("Nhập đúng dạng lat, lon (ví dụ: 12.866653, 108.2558594).", "gps-error");
+          return;
+        }
+        onPositionUpdate({ coords: { latitude: lat, longitude: lon } });
+        setStatus("Đã áp dụng tọa độ test.", "gps-ok");
+      });
+
+      // --- Nút "Bật âm thanh": kích hoạt audio (Chrome iOS cần user gesture) + xin GPS (bỏ qua GPS nếu test mode)
       btnAudio.addEventListener("click", function () {
         if (!window.speechSynthesis) {
           setStatus("Trình duyệt không hỗ trợ đọc tiếng nói.", "gps-error");
@@ -420,16 +459,24 @@
         audioEnabled = true;
         btnAudio.textContent = "Đã bật âm thanh";
         btnAudio.disabled = true;
+        if (testMode) {
+          setStatus("Chế độ test: nhập tọa độ và nhấn \"Áp dụng tọa độ\".", "gps-pending");
+          return;
+        }
         setStatus("Đang xin quyền GPS...", "gps-pending");
         startWatching();
       });
 
       btnReread.addEventListener("click", function () {
         if (!currentBlock) return;
-        var text = currentBlock.short_text || currentBlock.long_text || "";
-        if (text) {
-          speakText(text);
-        }
+        var text = currentBlock.info || "";
+        if (text) speakText(text);
+      });
+
+      btnReadDetail.addEventListener("click", function () {
+        if (!currentBlock || !currentBlock.depth_info) return;
+        var text = buildDepthText(currentBlock.depth_info);
+        if (text) speakText(text);
       });
 
       toggleDetailBtn.addEventListener("click", function () {
@@ -438,18 +485,22 @@
         toggleDetailBtn.textContent = show ? "Xem chi tiết" : "Thu gọn";
       });
 
-      // Cho phép "Đọc lại" khi đã có block
-      function updateRereadButton() {
+      // Cập nhật nút Đọc lại / Đọc chi tiết theo block hiện tại
+      function updateReadButtons() {
         btnReread.disabled = !currentBlock;
+        if (btnReadDetail) {
+          var hasDepth = currentBlock && currentBlock.depth_info;
+          btnReadDetail.style.display = hasDepth ? "inline-block" : "none";
+          btnReadDetail.disabled = !hasDepth;
+        }
       }
 
-      // Cập nhật trạng thái nút Đọc lại mỗi khi render block
       var origRender = renderBlock;
       renderBlock = function (block) {
         origRender.apply(null, arguments);
-        updateRereadButton();
+        updateReadButtons();
       };
-      updateRereadButton();
+      updateReadButtons();
     })();
   </script>
 </body>

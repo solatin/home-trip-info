@@ -1,10 +1,10 @@
 # Phượt Dak Lak → Sài Gòn
 
-Web app chạy trên iOS Safari (và trình duyệt hiện đại), dùng để phát thông tin theo từng đoạn đường khi đi phượt từ Đắk Lắk về Sài Gòn. Dữ liệu block lưu local trong `data.js`, không cần backend.
+Web app chạy trên **Chrome trên iOS** (và trình duyệt hiện đại), dùng để phát thông tin theo từng đoạn đường khi đi phượt từ Đắk Lắk về Sài Gòn. Dữ liệu block lưu local trong `data.js`, không cần backend.
 
 ## Yêu cầu
 
-- HTTPS (bắt buộc cho geolocation, reverse geocoding, speech trên iOS Safari)
+- HTTPS (bắt buộc cho geolocation, reverse geocoding, speech trên Chrome iOS)
 - Trình duyệt hỗ trợ: Geolocation API, Speech Synthesis API
 
 ## Cấu trúc
@@ -27,18 +27,20 @@ npm i -g vercel
 vercel
 ```
 
-## Cập nhật dữ liệu block
+## Cập nhật tuyến và BLOCKS
 
-Chỉnh file `data.js`: thêm/sửa các phần tử trong mảng `BLOCKS`. Mỗi block cần:
+- **Tuyến (ROUTE)**: Nguồn `geojson.json`; app load `route.js` (sync). Sau khi sửa `geojson.json`, chạy `node scripts/geojson-to-js.js` để sinh lại `route.js`.
 
-- `id`, `start_km`, `end_km`, `province`, `district`, `short_text`, `long_text`
-
-Sau khi có file JSON chi tiết, có thể convert sang định dạng trên và paste vào `BLOCKS`.
+- **BLOCKS**: Theo **km** (best practice tracking). Chỉ các địa danh đã liệt kê. Sau khi đổi tuyến (geojson), chạy:
+  ```bash
+  node scripts/blocks-by-km.js
+  ```
+  Copy output vào `data.js` thay mảng BLOCKS. Mỗi block có `id`, `km_start`, `km_end`, `name`, `region`, `info`. App dùng `getTraveledKM(lat, lon)` → `getCurrentBlock(km)` để xác định block hiện tại.
 
 ## Luồng sử dụng
 
 1. Mở web (trên điện thoại, qua HTTPS).
-2. Nhấn **Bật âm thanh** (cần cho speech trên iOS).
+2. Nhấn **Bật âm thanh** (cần cho speech trên Chrome iOS).
 3. Cho phép quyền GPS khi trình duyệt hỏi.
 4. Điểm GPS đầu tiên được lưu làm điểm xuất phát.
 5. App tính quãng đường đã đi, gọi reverse geocoding (debounce ~9s), xác định block và cập nhật nội dung.
