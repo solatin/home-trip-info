@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Phượt Dak Lak → Sài Gòn</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --success: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      --radius: 12px;
+      --safe-top: env(safe-area-inset-top, 0);
+      --safe-bottom: env(safe-area-inset-bottom, 0);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
+      padding-top: var(--safe-top);
+      padding-bottom: var(--safe-bottom);
+      -webkit-text-size-adjust: 100%;
+    }
+
+    .container {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 16px;
+      padding-bottom: calc(16px + var(--safe-bottom));
+    }
+
+    header {
+      text-align: center;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin: 0;
+      color: var(--text);
+    }
+
+    .status {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .status.gps-ok { color: var(--success); }
+    .status.gps-error { color: var(--danger); }
+    .status.gps-pending { color: var(--warning); }
+
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 18px;
+      margin-top: 16px;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .block-name {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+
+    .block-text {
+      font-size: 1.05rem;
+      line-height: 1.55;
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .block-text.long {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      color: var(--muted);
+    }
+
+    .toggle-detail {
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 0.95rem;
+      color: var(--accent);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px 0;
+      text-decoration: underline;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+
+    .btn {
+      flex: 1;
+      min-width: 140px;
+      padding: 14px 20px;
+      font-size: 1.05rem;
+      font-weight: 600;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-family: inherit;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-secondary {
+      background: rgba(255,255,255,0.1);
+      color: var(--text);
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .info-line {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    .scroll-wrap {
+      max-height: 60vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Phượt Dak Lak → Sài Gòn</h1>
+      <p class="status gps-pending" id="status">Nhấn "Bật âm thanh" rồi cho phép GPS</p>
+    </header>
+
+    <div class="actions">
+      <button type="button" class="btn btn-primary" id="btnAudio">Bật âm thanh</button>
+      <button type="button" class="btn btn-secondary" id="btnReread" disabled>Đọc lại</button>
+    </div>
+
+    <div class="card" id="cardBlock">
+      <div id="blockContent" class="scroll-wrap">
+        <p class="empty-state" id="emptyState">Đang lấy vị trí... Sau khi có GPS, block hiện tại sẽ hiển thị ở đây.</p>
+        <div id="blockDetail" style="display: none;">
+          <div class="block-name" id="blockName"></div>
+          <p class="block-text" id="shortText"></p>
+          <button type="button" class="toggle-detail" id="toggleDetail">Xem chi tiết</button>
+          <div class="block-text long" id="longText" style="display: none;"></div>
+          <p class="info-line" id="infoLine"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dữ liệu block: load trước script chính -->
+  <script src="./data.js"></script>
+  <script>
+    (function () {
+      "use strict";
+
+      // --- Cấu hình ---
+      var WATCH_OPTIONS = {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 15000
+      };
+      var WATCH_INTERVAL_MS = 4000;   // 4 giây
+      var GEOCODE_DEBOUNCE_MS = 9000; // 9 giây
+      var NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1";
+
+      // --- State ---
+      var startPoint = null;       // { lat, lon } điểm xuất phát
+      var currentBlock = null;     // block đang active
+      var lastBlockId = null;      // để phát hiện đổi block
+      var audioEnabled = false;
+      var geocodeTimer = null;
+      var lastGeocodeResult = null;
+      var watchId = null;
+
+      // --- DOM ---
+      var statusEl = document.getElementById("status");
+      var emptyStateEl = document.getElementById("emptyState");
+      var blockDetailEl = document.getElementById("blockDetail");
+      var blockNameEl = document.getElementById("blockName");
+      var shortTextEl = document.getElementById("shortText");
+      var longTextEl = document.getElementById("longText");
+      var toggleDetailBtn = document.getElementById("toggleDetail");
+      var infoLineEl = document.getElementById("infoLine");
+      var btnAudio = document.getElementById("btnAudio");
+      var btnReread = document.getElementById("btnReread");
+
+      /**
+       * Tính khoảng cách Haversine (km) giữa hai điểm WGS84
+       */
+      function haversineKm(lat1, lon1, lat2, lon2) {
+        var R = 6371;
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        var a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      }
+
+      /**
+       * Tìm block theo quãng đường đã đi (traveled_km).
+       * Nếu có lastGeocodeResult (district) thì ưu tiên block trùng district.
+       */
+      function findBlockByTraveledKm(traveledKm, districtFromGeocode) {
+        if (typeof BLOCKS === "undefined" || !BLOCKS.length) return null;
+
+        var candidates = BLOCKS.filter(function (b) {
+          return traveledKm >= b.start_km && traveledKm <= b.end_km;
+        });
+
+        if (districtFromGeocode && candidates.length > 1) {
+          var byDistrict = candidates.filter(function (b) {
+            return b.district && districtFromGeocode.indexOf(b.district) >= 0;
+          });
+          if (byDistrict.length) return byDistrict[0];
+        }
+        if (candidates.length) return candidates[0];
+        if (traveledKm < BLOCKS[0].start_km) return BLOCKS[0];
+        return BLOCKS[BLOCKS.length - 1];
+      }
+
+      /**
+       * Gọi Nominatim reverse geocode (debounce gọi từ ngoài)
+       */
+      function reverseGeocode(lat, lon, callback) {
+        var url = NOMINATIM_URL.replace("{lat}", lat).replace("{lon}", lon);
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", url);
+        xhr.setRequestHeader("Accept", "application/json");
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState !== 4) return;
+          if (xhr.status !== 200) {
+            callback(null);
+            return;
+          }
+          try {
+            var data = JSON.parse(xhr.responseText);
+            var addr = data.address || {};
+            var district = addr.county || addr.district || addr.municipality || "";
+            var province = addr.state || addr.province || "";
+            lastGeocodeResult = { district: district, province: province };
+            callback(lastGeocodeResult);
+          } catch (e) {
+            callback(null);
+          }
+        };
+        xhr.send();
+      }
+
+      /**
+       * Cập nhật UI cho một block
+       */
+      function renderBlock(block, traveledKm) {
+        if (!block) return;
+
+        emptyStateEl.style.display = "none";
+        blockDetailEl.style.display = "block";
+
+        blockNameEl.textContent = block.id + " · " + (block.district || "") + ", " + (block.province || "");
+        shortTextEl.textContent = block.short_text || "";
+        longTextEl.textContent = block.long_text || "";
+        longTextEl.style.display = "none";
+        toggleDetailBtn.textContent = "Xem chi tiết";
+
+        var kmText = traveledKm != null ? "Đã đi ~" + traveledKm.toFixed(1) + " km · " : "";
+        infoLineEl.textContent = kmText + "Đoạn " + block.start_km + " – " + block.end_km + " km";
+      }
+
+      /**
+       * Đọc nội dung bằng speechSynthesis (short hoặc full)
+       */
+      function speakText(text, onEnd) {
+        if (!text || !window.speechSynthesis) {
+          if (onEnd) onEnd();
+          return;
+        }
+        window.speechSynthesis.cancel();
+        var u = new SpeechSynthesisUtterance(text);
+        u.lang = "vi-VN";
+        u.rate = 0.95;
+        if (onEnd) u.onend = onEnd;
+        window.speechSynthesis.speak(u);
+      }
+
+      /**
+       * Xử lý khi có vị trí mới: đặt start point, tính traveled_km, geocode (debounce), chọn block, cập nhật UI + audio
+       */
+      function onPositionUpdate(position) {
+        var lat = position.coords.latitude;
+        var lon = position.coords.longitude;
+
+        if (startPoint === null) {
+          startPoint = { lat: lat, lon: lon };
+          setStatus("Đã lưu điểm xuất phát. Đang cập nhật...", "gps-ok");
+        }
+
+        var traveledKm = haversineKm(startPoint.lat, startPoint.lon, lat, lon);
+        var districtFromGeocode = lastGeocodeResult ? lastGeocodeResult.district : null;
+        var block = findBlockByTraveledKm(traveledKm, districtFromGeocode);
+
+        if (block && block.id !== lastBlockId) {
+          lastBlockId = block.id;
+          currentBlock = block;
+          renderBlock(block, traveledKm);
+          if (audioEnabled && block.short_text) {
+            speakText(block.short_text);
+          }
+        } else if (block) {
+          currentBlock = block;
+          renderBlock(block, traveledKm);
+        } else if (BLOCKS && BLOCKS.length) {
+          currentBlock = BLOCKS[0];
+          renderBlock(currentBlock, traveledKm);
+        }
+
+        // Reverse geocode debounce
+        if (geocodeTimer) clearTimeout(geocodeTimer);
+        geocodeTimer = setTimeout(function () {
+          geocodeTimer = null;
+          reverseGeocode(lat, lon, function (result) {
+            if (result && currentBlock) {
+              var blockAgain = findBlockByTraveledKm(traveledKm, result.district);
+              if (blockAgain && blockAgain.id !== currentBlock.id) {
+                currentBlock = blockAgain;
+                lastBlockId = blockAgain.id;
+                renderBlock(currentBlock, traveledKm);
+                if (audioEnabled && blockAgain.short_text) speakText(blockAgain.short_text);
+              }
+            }
+          });
+        }, GEOCODE_DEBOUNCE_MS);
+      }
+
+      function onPositionError(err) {
+        var msg = "Lỗi GPS: ";
+        if (err.code === 1) msg += "Từ chối quyền.";
+        else if (err.code === 2) msg += "Không lấy được vị trí.";
+        else if (err.code === 3) msg += "Hết thời gian chờ.";
+        else msg += err.message || "Không xác định.";
+        setStatus(msg, "gps-error");
+      }
+
+      function setStatus(text, className) {
+        statusEl.textContent = text;
+        statusEl.className = "status " + (className || "");
+      }
+
+      /**
+       * Bật theo dõi GPS (sau khi user đã bật âm thanh / tương tác)
+       */
+      function startWatching() {
+        if (watchId != null) return;
+        if (!navigator.geolocation) {
+          setStatus("Trình duyệt không hỗ trợ GPS.", "gps-error");
+          return;
+        }
+        setStatus("Đang lấy vị trí...", "gps-pending");
+        watchId = navigator.geolocation.watchPosition(onPositionUpdate, onPositionError, WATCH_OPTIONS);
+        // Cập nhật theo chu kỳ nếu watchPosition không đủ (một số thiết bị)
+        setInterval(function () {
+          if (watchId == null) return;
+          navigator.geolocation.getCurrentPosition(onPositionUpdate, onPositionError, WATCH_OPTIONS);
+        }, WATCH_INTERVAL_MS);
+      }
+
+      // --- Nút "Bật âm thanh": kích hoạt audio (iOS cần user gesture) + xin GPS
+      btnAudio.addEventListener("click", function () {
+        if (!window.speechSynthesis) {
+          setStatus("Trình duyệt không hỗ trợ đọc tiếng nói.", "gps-error");
+          return;
+        }
+        audioEnabled = true;
+        btnAudio.textContent = "Đã bật âm thanh";
+        btnAudio.disabled = true;
+        setStatus("Đang xin quyền GPS...", "gps-pending");
+        startWatching();
+      });
+
+      btnReread.addEventListener("click", function () {
+        if (!currentBlock) return;
+        var text = currentBlock.short_text || currentBlock.long_text || "";
+        if (text) {
+          speakText(text);
+        }
+      });
+
+      toggleDetailBtn.addEventListener("click", function () {
+        var show = longTextEl.style.display !== "none";
+        longTextEl.style.display = show ? "none" : "block";
+        toggleDetailBtn.textContent = show ? "Xem chi tiết" : "Thu gọn";
+      });
+
+      // Cho phép "Đọc lại" khi đã có block
+      function updateRereadButton() {
+        btnReread.disabled = !currentBlock;
+      }
+
+      // Cập nhật trạng thái nút Đọc lại mỗi khi render block
+      var origRender = renderBlock;
+      renderBlock = function (block) {
+        origRender.apply(null, arguments);
+        updateRereadButton();
+      };
+      updateRereadButton();
+    })();
+  </script>
+</body>
+</html>
