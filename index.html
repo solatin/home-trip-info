@@ -256,6 +256,7 @@
       var audioEnabled = false;
       var watchId = null;
       var gpsTimeoutCount = 0;
+      var silentAudioEl = null; // Audio phát silence khi đọc — iOS cần có <audio> đang play mới hiện Control Center
 
       // --- DOM ---
       var statusEl = document.getElementById("status");
@@ -316,20 +317,58 @@
       }
 
       /**
-       * Gắn Media Session để giọng đọc hiện như media trên màn hình khóa / Control Center (iPhone), có thể bật/tắt từ ngoài.
+       * Tạo blob WAV im lặng (để phát qua <audio>, iOS cần có media thật mới hiện Now Playing).
+       */
+      function createSilentWAVBlob(seconds) {
+        var sampleRate = 8000;
+        var numSamples = sampleRate * seconds;
+        var dataSize = numSamples * 2; // 16-bit
+        var buffer = new ArrayBuffer(44 + dataSize);
+        var view = new DataView(buffer);
+        function w(str, o) { for (var i = 0; i < str.length; i++) view.setUint8(o + i, str.charCodeAt(i)); }
+        w("RIFF", 0);
+        view.setUint32(4, 36 + dataSize, true);
+        w("WAVE", 8);
+        w("fmt ", 12);
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, 1, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        w("data", 36);
+        view.setUint32(40, dataSize, true);
+        return new Blob([buffer], { type: "audio/wav" });
+      }
+
+      /**
+       * Gắn Media Session + audio im lặng. iOS chỉ hiện Control Center khi có <audio> đang phát.
        */
       function setupMediaSession() {
         if (!navigator.mediaSession) return;
+        if (!silentAudioEl) {
+          try {
+            var blob = createSilentWAVBlob(60);
+            var url = URL.createObjectURL(blob);
+            silentAudioEl = new Audio(url);
+            silentAudioEl.loop = true;
+            silentAudioEl.volume = 0;
+          } catch (e) { console.warn("Silent audio init failed", e); }
+        }
         navigator.mediaSession.setActionHandler("play", function () {
           if (window.speechSynthesis) window.speechSynthesis.resume();
+          if (silentAudioEl) try { silentAudioEl.play(); } catch (err) {}
           navigator.mediaSession.playbackState = "playing";
         });
         navigator.mediaSession.setActionHandler("pause", function () {
           if (window.speechSynthesis) window.speechSynthesis.pause();
+          if (silentAudioEl) try { silentAudioEl.pause(); } catch (err) {}
           navigator.mediaSession.playbackState = "paused";
         });
         navigator.mediaSession.setActionHandler("stop", function () {
           if (window.speechSynthesis) window.speechSynthesis.cancel();
+          if (silentAudioEl) try { silentAudioEl.pause(); } catch (err) {}
           navigator.mediaSession.playbackState = "none";
         });
       }
@@ -344,6 +383,7 @@
           return;
         }
         window.speechSynthesis.cancel();
+        if (silentAudioEl) try { silentAudioEl.pause(); } catch (err) {}
         if (navigator.mediaSession && typeof MediaMetadata !== "undefined") {
           navigator.mediaSession.metadata = new MediaMetadata({
             title: mediaTitle || "Phượt Dak Lak → Sài Gòn",
@@ -351,21 +391,27 @@
           });
           navigator.mediaSession.playbackState = "playing";
         }
+        if (silentAudioEl) try { silentAudioEl.play(); } catch (err) {}
         var u = new SpeechSynthesisUtterance(text);
         u.lang = "vi-VN";
         u.rate = 0.95;
         u.onend = function () {
           if (navigator.mediaSession) navigator.mediaSession.playbackState = "none";
+          if (silentAudioEl) try { silentAudioEl.pause(); } catch (err) {}
           if (onEnd) onEnd();
         };
         u.onpause = function () {
           if (navigator.mediaSession) navigator.mediaSession.playbackState = "paused";
+          if (silentAudioEl) try { silentAudioEl.pause(); } catch (err) {}
         };
         u.onresume = function () {
           if (navigator.mediaSession) navigator.mediaSession.playbackState = "playing";
+          if (silentAudioEl) try { silentAudioEl.play(); } catch (err) {}
         };
         u.onerror = function () {
           if (navigator.mediaSession) navigator.mediaSession.playbackState = "none";
+          if (silentAudioEl) try { silentAudioEl.pause(); } catch (err) {}
+          if (onEnd) onEnd();
         };
         window.speechSynthesis.speak(u);
       }
