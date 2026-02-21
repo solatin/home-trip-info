@@ -316,18 +316,57 @@
       }
 
       /**
-       * Đọc nội dung bằng speechSynthesis (short hoặc full)
+       * Gắn Media Session để giọng đọc hiện như media trên màn hình khóa / Control Center (iPhone), có thể bật/tắt từ ngoài.
        */
-      function speakText(text, onEnd) {
+      function setupMediaSession() {
+        if (!navigator.mediaSession) return;
+        navigator.mediaSession.setActionHandler("play", function () {
+          if (window.speechSynthesis) window.speechSynthesis.resume();
+          navigator.mediaSession.playbackState = "playing";
+        });
+        navigator.mediaSession.setActionHandler("pause", function () {
+          if (window.speechSynthesis) window.speechSynthesis.pause();
+          navigator.mediaSession.playbackState = "paused";
+        });
+        navigator.mediaSession.setActionHandler("stop", function () {
+          if (window.speechSynthesis) window.speechSynthesis.cancel();
+          navigator.mediaSession.playbackState = "none";
+        });
+      }
+
+      /**
+       * Đọc nội dung bằng speechSynthesis (short hoặc full).
+       * mediaTitle: tùy chọn, hiện trên màn hình khóa / Control Center (Media Session).
+       */
+      function speakText(text, onEnd, mediaTitle) {
         if (!text || !window.speechSynthesis) {
           if (onEnd) onEnd();
           return;
         }
         window.speechSynthesis.cancel();
+        if (navigator.mediaSession && typeof MediaMetadata !== "undefined") {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: mediaTitle || "Phượt Dak Lak → Sài Gòn",
+            artist: "Thông tin tuyến đường"
+          });
+          navigator.mediaSession.playbackState = "playing";
+        }
         var u = new SpeechSynthesisUtterance(text);
         u.lang = "vi-VN";
         u.rate = 0.95;
-        if (onEnd) u.onend = onEnd;
+        u.onend = function () {
+          if (navigator.mediaSession) navigator.mediaSession.playbackState = "none";
+          if (onEnd) onEnd();
+        };
+        u.onpause = function () {
+          if (navigator.mediaSession) navigator.mediaSession.playbackState = "paused";
+        };
+        u.onresume = function () {
+          if (navigator.mediaSession) navigator.mediaSession.playbackState = "playing";
+        };
+        u.onerror = function () {
+          if (navigator.mediaSession) navigator.mediaSession.playbackState = "none";
+        };
         window.speechSynthesis.speak(u);
       }
 
@@ -366,7 +405,8 @@
           currentBlock = block;
           if (audioEnabled) {
             var fullText = getBlockFullSpeechText(block);
-            if (fullText) speakText(fullText);
+            var title = (block.id ? block.id + " · " : "") + (block.name || "");
+            if (fullText) speakText(fullText, undefined, title);
           }
         } else if (block) {
           currentBlock = block;
@@ -460,15 +500,19 @@
         setStatus("Đã áp dụng tọa độ test.", "gps-ok");
       });
 
-      // --- Nút "Bật âm thanh": kích hoạt audio (Chrome iOS cần user gesture) + xin GPS (bỏ qua GPS nếu test mode)
+      // --- Nút "Bật âm thanh": kích hoạt audio (Chrome iOS cần user gesture) + xin GPS
+      // Trên iOS, giọng nói chỉ chạy nếu lần đầu phát nằm trong user gesture. Phát câu mồi ngay trong click để "mở khóa", sau đó auto-đọc từ callback GPS mới có thể chạy.
       btnAudio.addEventListener("click", function () {
         if (!window.speechSynthesis) {
           setStatus("Trình duyệt không hỗ trợ đọc tiếng nói.", "gps-error");
           return;
         }
         audioEnabled = true;
+        setupMediaSession();
         btnAudio.textContent = "Đã bật âm thanh";
         btnAudio.disabled = true;
+        // Câu mồi ngay trong click → iOS coi là user gesture, cho phép các lần speak sau (từ callback GPS)
+        speakText("Âm thanh đã bật. Đang lấy vị trí.", undefined, "Phượt Dak Lak → Sài Gòn");
         if (testMode) {
           setStatus("Chế độ test: nhập tọa độ và nhấn \"Áp dụng tọa độ\".", "gps-pending");
           return;
@@ -482,13 +526,15 @@
       btnReread.addEventListener("click", function () {
         if (!currentBlock) return;
         var text = currentBlock.info || "";
-        if (text) speakText(text);
+        var title = (currentBlock.id ? currentBlock.id + " · " : "") + (currentBlock.name || "");
+        if (text) speakText(text, undefined, title);
       });
 
       btnReadDetail.addEventListener("click", function () {
         if (!currentBlock || !currentBlock.depth_info) return;
         var text = buildDepthText(currentBlock.depth_info);
-        if (text) speakText(text);
+        var title = (currentBlock.id ? currentBlock.id + " · " : "") + (currentBlock.name || "") + " (chi tiết)";
+        if (text) speakText(text, undefined, title);
       });
 
       toggleDetailBtn.addEventListener("click", function () {
