@@ -203,6 +203,7 @@
 
     <div class="actions">
       <button type="button" class="btn btn-primary" id="btnAudio">Bật âm thanh</button>
+      <button type="button" class="btn btn-secondary" id="btnFetchPosition">Lấy vị trí</button>
       <button type="button" class="btn btn-secondary" id="btnReread" disabled>Đọc lại</button>
       <button type="button" class="btn btn-secondary" id="btnReadDetail" disabled style="display: none;">Đọc chi tiết</button>
     </div>
@@ -243,20 +244,18 @@
         maximumAge: 60000,  // Cho phép dùng vị trí cache ≤ 1 phút (desktop thường chỉ có network location)
         timeout: 60000      // 60s (desktop/macOS network location có thể rất chậm)
       };
-      var WATCH_INTERVAL_MS = 5000;   // 5 giây (chỉ bật sau khi đã có vị trí thành công)
-      var GPS_TIMEOUT_ERROR_AFTER = 3; // Chỉ hiển thị lỗi đỏ sau N lần timeout liên tiếp
+      var GPS_TIMEOUT_ERROR_AFTER = 3;
 
       // --- State ---
       var testMode = (function () {
         var p = typeof window !== "undefined" && window.location && window.location.search;
         return p && (p.indexOf("test=1") >= 0 || p.indexOf("test=true") >= 0);
       })();
-      var currentBlock = null;     // block đang active (từ MapMatcher + ROUTE/BLOCKS)
-      var lastBlockId = null;      // để phát hiện đổi block
+      var currentBlock = null;
+      var lastBlockId = null;
       var audioEnabled = false;
       var watchId = null;
-      var pollIntervalId = null;  // getCurrentPosition định kỳ, chỉ chạy sau khi đã có fix
-      var gpsTimeoutCount = 0;    // Đếm timeout liên tiếp, chỉ báo lỗi sau vài lần
+      var gpsTimeoutCount = 0;
 
       // --- DOM ---
       var statusEl = document.getElementById("status");
@@ -271,6 +270,7 @@
       var toggleDetailBtn = document.getElementById("toggleDetail");
       var infoLineEl = document.getElementById("infoLine");
       var btnAudio = document.getElementById("btnAudio");
+      var btnFetchPosition = document.getElementById("btnFetchPosition");
       var btnReread = document.getElementById("btnReread");
       var btnReadDetail = document.getElementById("btnReadDetail");
 
@@ -350,7 +350,7 @@
       function onPositionUpdate(position) {
         var lat = position.coords.latitude;
         var lon = position.coords.longitude;
-        gpsTimeoutCount = 0; // Reset khi có vị trí thành công
+        gpsTimeoutCount = 0;
         console.log("[GPS] position", lat.toFixed(5), lon.toFixed(5));
 
         if (!window.MapMatcher || !window.ROUTE || !window.BLOCKS) {
@@ -364,21 +364,29 @@
         if (block && block.id !== lastBlockId) {
           lastBlockId = block.id;
           currentBlock = block;
-          renderBlock(block, traveledKm);
           if (audioEnabled) {
             var fullText = getBlockFullSpeechText(block);
             if (fullText) speakText(fullText);
           }
         } else if (block) {
           currentBlock = block;
-          renderBlock(block, traveledKm);
         } else if (window.BLOCKS && window.BLOCKS.length) {
           currentBlock = window.BLOCKS[0];
-          renderBlock(currentBlock, traveledKm);
         }
 
-        if (pollIntervalId == null) startPollingIfNeeded();
-        setStatus("Đã cập nhật vị trí theo tuyến.", "gps-ok");
+        var now = new Date();
+        var timeStr = now.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        var statusMsg = "Đã lấy vị trí lúc " + timeStr + " — " + lat.toFixed(5) + ", " + lon.toFixed(5);
+        var blockToRender = currentBlock;
+        var kmToRender = traveledKm;
+        // Delay + rAF + force reflow: Chrome thường không repaint ngay trong callback geolocation
+        setTimeout(function () {
+          requestAnimationFrame(function () {
+            if (blockToRender) renderBlock(blockToRender, kmToRender);
+            setStatus(statusMsg, "gps-ok");
+            void statusEl.offsetHeight; // force reflow để ép repaint
+          });
+        }, 50);
       }
 
       function onPositionError(err) {
@@ -405,9 +413,7 @@
       }
 
       /**
-       * Bật theo dõi GPS (sau khi user đã bật âm thanh / tương tác).
-       * Chỉ thêm polling (getCurrentPosition định kỳ) sau khi đã có ít nhất 1 lần lấy vị trí thành công,
-       * tránh gọi getCurrentPosition liên tục gây nhiều lỗi timeout.
+       * Bật theo dõi GPS (watchPosition, bắt đầu từ user gesture).
        */
       function startWatching() {
         if (watchId != null) return;
@@ -415,16 +421,20 @@
           setStatus("Trình duyệt không hỗ trợ GPS.", "gps-error");
           return;
         }
-        setStatus("Đang lấy vị trí (có thể mất đến 60 giây trên máy bàn)...", "gps-pending");
+        setStatus("Đang lấy vị trí...", "gps-pending");
         watchId = navigator.geolocation.watchPosition(onPositionUpdate, onPositionError, WATCH_OPTIONS);
       }
 
-      function startPollingIfNeeded() {
-        if (pollIntervalId != null) return;
-        pollIntervalId = setInterval(function () {
-          if (watchId == null) return;
-          navigator.geolocation.getCurrentPosition(onPositionUpdate, onPositionError, WATCH_OPTIONS);
-        }, WATCH_INTERVAL_MS);
+      /**
+       * Fetch vị trí chủ động (user bấm nút — user gesture nên không bị violation).
+       */
+      function fetchPosition() {
+        if (!navigator.geolocation) {
+          setStatus("Trình duyệt không hỗ trợ GPS.", "gps-error");
+          return;
+        }
+        setStatus("Đang lấy vị trí...", "gps-pending");
+        navigator.geolocation.getCurrentPosition(onPositionUpdate, onPositionError, WATCH_OPTIONS);
       }
 
       // --- Test mode: hiện card nhập tọa độ, prefill đầu tuyến nếu có
@@ -466,6 +476,8 @@
         setStatus("Đang xin quyền GPS...", "gps-pending");
         startWatching();
       });
+
+      if (btnFetchPosition) btnFetchPosition.addEventListener("click", fetchPosition);
 
       btnReread.addEventListener("click", function () {
         if (!currentBlock) return;
