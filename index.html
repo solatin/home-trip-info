@@ -245,6 +245,8 @@
         timeout: 60000      // 60s (desktop/macOS network location có thể rất chậm)
       };
       var GPS_TIMEOUT_ERROR_AFTER = 3;
+      var POSITION_UPDATE_THROTTLE_MS = 3000; // Tránh watchPosition spam ~1s/lần
+      var lastPositionUpdateTime = 0;
 
       // --- State ---
       var testMode = (function () {
@@ -430,9 +432,14 @@
       }
 
       /**
-       * Xử lý khi có vị trí mới: map-matching theo ROUTE → traveled_km → block, cập nhật UI + audio
+       * Xử lý khi có vị trí mới: map-matching theo ROUTE → traveled_km → block, cập nhật UI + audio.
+       * options.force = true khi gọi từ nút "Lấy vị trí" để không bị throttle.
        */
-      function onPositionUpdate(position) {
+      function onPositionUpdate(position, options) {
+        var force = options && options.force;
+        if (!force && (Date.now() - lastPositionUpdateTime < POSITION_UPDATE_THROTTLE_MS)) return;
+        lastPositionUpdateTime = Date.now();
+
         var lat = position.coords.latitude;
         var lon = position.coords.longitude;
         gpsTimeoutCount = 0;
@@ -520,7 +527,11 @@
           return;
         }
         setStatus("Đang lấy vị trí...", "gps-pending");
-        navigator.geolocation.getCurrentPosition(onPositionUpdate, onPositionError, WATCH_OPTIONS);
+        navigator.geolocation.getCurrentPosition(
+          function (position) { onPositionUpdate(position, { force: true }); },
+          onPositionError,
+          WATCH_OPTIONS
+        );
       }
 
       // --- Test mode: hiện card nhập tọa độ, prefill đầu tuyến nếu có
@@ -542,7 +553,7 @@
           setStatus("Nhập đúng dạng lat, lon (ví dụ: 12.866653, 108.2558594).", "gps-error");
           return;
         }
-        onPositionUpdate({ coords: { latitude: lat, longitude: lon } });
+        onPositionUpdate({ coords: { latitude: lat, longitude: lon } }, { force: true });
         setStatus("Đã áp dụng tọa độ test.", "gps-ok");
       });
 
