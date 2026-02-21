@@ -20,12 +20,7 @@ Web app chạy trên **Chrome trên iOS** (và trình duyệt hiện đại), d�
 3. Root Directory để mặc định, Framework Preset: Other. Deploy.
 4. Truy cập URL HTTPS do Vercel cấp (ví dụ `https://xxx.vercel.app`).
 
-Deploy từ CLI:
-
-```bash
-npm i -g vercel
-vercel
-```
+Deploy từ CLI: `npx vercel` (hoặc cài global `vercel` rồi chạy `vercel`). Repo static, không build.
 
 ## Cập nhật tuyến và BLOCKS
 
